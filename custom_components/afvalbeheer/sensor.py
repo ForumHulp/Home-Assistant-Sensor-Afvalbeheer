@@ -78,7 +78,11 @@ Configuration.yaml:
 import logging
 from datetime import datetime
 from datetime import timedelta
+from datetime import date
+from lxml.html import etree
+import dateparser
 import requests
+import urllib
 import voluptuous as vol
 
 from homeassistant.components.sensor import PLATFORM_SCHEMA
@@ -125,6 +129,7 @@ COLLECTOR_URL = {
     'venray': 'https://afvalkalender.venray.nl',
     'waalre': 'https://afvalkalender.waalre.nl',
     'zrd': 'https://afvalkalender.zrd.nl',
+    'rd4': 'https://www.rd4info.nl/NSI/Burger/Aspx/afvalkalender_public_text.aspx',
 }
 
 RENAME_TITLES = {
@@ -132,16 +137,20 @@ RENAME_TITLES = {
     'groente': 'gft',
     'gft': 'gft',
     'papier': 'papier',
+    'oud papier': 'papier',
     'rest': 'restafval',
     'blik': 'pbd',
     'plastic': 'pmd',
+    'best-tas': 'pmd',
     'sloop': 'sloopafval',
     'klein chemisch afval': 'kca',
     'kca': 'kca',
     'pmd': 'pmd',
+    'pmd afval': 'pmd',
     'textiel': 'textiel',
     'kerstbo': 'kerstbomen',
     'snoeiafval': 'snoeiafval',
+    'snoeiafval op afspraak': 'snoeiafval',
 }
 
 FRACTION_ICONS = {
@@ -199,7 +208,6 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
 
     add_entities(entities)
 
-
 class WasteData(object):
 
     def __init__(self, postcode, street_number, waste_collector):
@@ -214,18 +222,48 @@ class WasteData(object):
         _LOGGER.debug('Updating Waste collection dates using Rest API')
 
         try:
-            url = self.main_url + '/rest/adressen/' + self.postcode + '-' + self.street_number
-            response = requests.get(url).json()
+            if self.waste_collector == 'rd4':
+                url = self.main_url + '?pc=' + self.postcode + '&nr=' + self.street_number + '&t='
+                req = urllib.request.Request(url=url)
+                f = urllib.request.urlopen(req)
+                response = f.read()
+                if response:
+                    dom = etree.HTML(response)
+                    tables = dom.xpath(".//table[@class='plaintextMonth']")
+                    today = datetime.combine(date.today(), datetime.min.time())
+                    data1 = []
+                    idx = 1
+                    for table in tables:
+                        rows = iter(table)
+                        for row in rows:
+                            values = [col.text for col in row]
+                            if values:
+                                values[0] = dateparser.parse(values[0])
+                                if values[0] >= today:
+                                    if not any(values[1].lower() in sublist['title'] for sublist in data1):
+                                         data1.append({'id': idx, 'ophaaldatum': values[0].strftime('%Y-%m-%d'), 'title': values[1].lower(), 'menu_title': values[1].lower(), 'icon_data': values[1].lower()})
+                                         idx = idx + 1
+
+                    response = data1
+                else:
+                    _LOGGER.error('An error has occurred.')
+            else:
+                url = self.main_url + '/rest/adressen/' + self.postcode + '-' + self.street_number
+                response = requests.get(url).json()
 
             if not response:
                 _LOGGER.error('Address not found!')
             else:
-                address_code = response[0]['bagId']
-                url = self.main_url + '/rest/adressen/' + address_code + '/afvalstromen'
-                request_json = requests.get(url).json()
+                if self.waste_collector == 'rd4':
+                    request_json = response
+                else:
+                    address_code = response[0]['bagId']
+                    url = self.main_url + '/rest/adressen/' + address_code + '/afvalstromen'
+                    request_json = requests.get(url).json()
                 if not request_json:
                     _LOGGER.error('No Waste data found!')
                 else:
+                    _LOGGER.error(request_json)
                     COLLECTOR_WASTE_ID[self.waste_collector] = {}
                     sensor_dict = {}
 
@@ -255,13 +293,13 @@ class WasteData(object):
                             COLLECTOR_WASTE_ID[self.waste_collector][title].append(str(key['id']))
 
                     self.data = sensor_dict
+                    _LOGGER.error(sensor_dict)
 
         except requests.exceptions.RequestException as exc:
             _LOGGER.error('Error occurred while fetching data: %r', exc)
             self.data = None
             return False
-
-
+	
 class WasteSensor(Entity):
 
     def __init__(self, data, sensor_type, waste_collector, date_format, date_only, name_prefix, built_in_icons):

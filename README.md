@@ -51,6 +51,7 @@ Choose your collector from this list:
   - Venray
   - Waalre
   - ZRD
+  - rd4
 
 ### Recourses
 ```

@@ -263,7 +263,6 @@ class WasteData(object):
                 if not request_json:
                     _LOGGER.error('No Waste data found!')
                 else:
-                    _LOGGER.error(request_json)
                     COLLECTOR_WASTE_ID[self.waste_collector] = {}
                     sensor_dict = {}
 
@@ -293,7 +292,6 @@ class WasteData(object):
                             COLLECTOR_WASTE_ID[self.waste_collector][title].append(str(key['id']))
 
                     self.data = sensor_dict
-                    _LOGGER.error(sensor_dict)
 
         except requests.exceptions.RequestException as exc:
             _LOGGER.error('Error occurred while fetching data: %r', exc)
@@ -312,7 +310,7 @@ class WasteSensor(Entity):
             self._name = waste_collector + ' ' + self.sensor_type
         else:
             self._name = self.sensor_type
-        self.built_in_icons = built_in_icons
+        self.built_in_icons = built_in_icons if self.waste_collector != 'rd4' else 1
         self._unit = ''
         self._hidden = False
         self._entity_picture = None
